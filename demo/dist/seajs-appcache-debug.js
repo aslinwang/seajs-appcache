@@ -1,3 +1,4 @@
+(function(){
 /**
  * The Sea.js plugin for appcache and increjs 
  * localStorage,version,increjs
@@ -23,6 +24,9 @@ seajs.on("fetch", function(arg){
 
 seajs.on("request", function(arg){
   console.log(arg, 'request');
-  console.log('abcdefghi');
+  console.log('abcdefgh');
 });
 
+
+define("seajs/seajs-appcache/1.0.1/seajs-appcache-debug", [], {});
+})();

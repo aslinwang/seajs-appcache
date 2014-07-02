@@ -1,8 +1,15 @@
 
 build:
 	@seatools build
+	@node syslib/cp.js dist/seajs-appcache-debug.js demo/dist/seajs-appcache-debug.js
 
-test-mocha:
+static:
+	@node demo/runner.js
+
+static-w:
+	@node demo/runner.js -w
+
+mocha:
 	@mocha tests/spec/mocha-runner.js
 
 test:
