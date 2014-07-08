@@ -13,4 +13,4 @@ describe('mocha demo', function(){
 		var num = '4';
 		num.should.be.a.String;
 	});
-})
+});

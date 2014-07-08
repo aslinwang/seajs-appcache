@@ -1,19 +1,108 @@
-<!doctype html>
+<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=0">
-<title>test</title>
-<script src="https://raw.githubusercontent.com/seajs/seajs/master/dist/sea-debug.js"></script>
+<title>seajs-appcache test</title>
+<link rel="stylesheet" media="all" href="../vendor/mocha.css">
 </head>
 <body>
-<div id="out"></div>
-<script>
-  // Clear preload
-//  seajs.data.preload.length = 0
-  seajs.use(['../test'], function(test) {
-    test.run(['appcache']);
-  })
+<div id="mocha"><p><a href=".">Index</a></p></div>
+<div id="messages"></div>
+<div id="fixtures"></div>
+<script src="../vendor/mocha.js"></script>
+<script src="../vendor/chai.js"></script>
+<script src="../vendor/gear.js"></script>
+<script src="../demo/lib/sea-debug.js"></script>
+<script src="../../dist/seajs-appcache-debug.js"></script>
+<script type="text/javascript">
+  var expect = chai.expect;
+
+  mocha.setup('bdd');
+
+  describe("seajs-appcache", function(){
+    var cfg = {
+      base : '/tests/assets',
+      appcache : {//appcache插件相关配置
+        dev : true,
+        jsdir : 'http://seajs.t.qq.com:8000/tests',//cdn上js目录(*)
+        cacheEnable : true,//是否启用appcache
+        incre : true//是否启用增量更新
+      }
+    };
+
+    describe('set dev environment', function(){
+      it('should has S in seajs', function(){
+        expect(seajs.S).to.be.a('object');
+      });
+    });
+
+    describe('load js module', function(){
+      seajs.config(gear.extend(cfg, {
+        alias : {
+          a : 'a_140707.js',
+          b : 'b_140707.js'
+        }
+      }));
+      it('should load js from network', function(done){
+        seajs.clearS();
+        seajs.use('a', function(A){
+          expect(A).to.contain.keys('name', 'sayHi');
+          done();
+        });
+      });
+
+      it('should load js from network and set localSorage', function(done){
+        seajs.clearS();
+        seajs.use('b', function(B){
+          var manifest = seajs.S.get('seajs_manifest');
+          var code = seajs.S.get('/assets/b');
+          expect(manifest).to.be.a('string');
+          expect(code).to.be.a('string');
+          done();
+        });
+      });
+      
+      it('should load js from localSorage', function(done){
+        var manifest = seajs.S.get('seajs_manifest', true) || {};
+        var key = '/assets/$c';
+        manifest[key] = '140707';
+        seajs.S.set('seajs_manifest', JSON.stringify(manifest));
+        seajs.S.set(key, 'define(\'$c\', function(require, exports){exports.name = \'$c\';console.log(\'$c.js\');});');
+
+        seajs.config(gear.extend(cfg, {
+          alias : {
+            $c : '$c_140707.js'
+          }
+        }));
+        seajs.use('$c', function($C){
+          expect($C).to.have.keys(['name']);
+          done();
+        });
+      });
+
+      it('should load js from network when localcache version is overdue', function(done){
+        var manifest = seajs.S.get('seajs_manifest', true) || {};
+        var key = '/assets/c';
+        manifest[key] = '140706';
+        seajs.S.set('seajs_manifest', JSON.stringify(manifest));
+        seajs.S.set(key, 'define(\'c\', function(require, exports){exports.name = \'c\';console.log(\'c.js\');});');
+
+        seajs.config(gear.extend(cfg, {
+          alias : {
+            c : 'c_140707.js'
+          }
+        }));
+
+        seajs.use('c', function(C){
+          expect(C).to.contain.keys(['work']);
+          done();
+        });
+      });
+    })
+  });
+
+  mocha.run();
 </script>
 </body>
 </html>

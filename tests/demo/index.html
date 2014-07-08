@@ -1,0 +1,38 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=0">
+<title>test page</title>
+<script src="lib/sea-debug.js"></script>
+<script src="../../dist/seajs-appcache-debug.js"></script>
+</head>
+<body>
+<div id="out">test...</div>
+<script>
+  // Clear preload
+//  seajs.data.preload.length = 0
+  window.dev = true;//develop
+
+  seajs.config({
+    base : '/tests/assets',
+    alias : {
+      a : 'a_140707.js',
+      b : 'b_140707.js'
+    },
+    appcache : {//appcache插件相关配置
+      //dev : true,
+      jsdir : 'http://seajs.t.qq.com:8000/tests',//cdn上js目录(*)
+      cacheEnable : true,//是否启用appcache
+      incre : true//是否启用增量更新
+    }
+  });
+  
+  seajs.use('b', function(b){
+    //console.log(a);
+    b.sayHi('aslin');
+  });
+
+</script>
+</body>
+</html>
