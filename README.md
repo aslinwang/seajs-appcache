@@ -5,7 +5,7 @@ A Sea.js plugin for appcache and increjs
 
 Usage
 -----
-```javascript
+```html
 <script src="path/to/sea.js"></script>
 <script src="path/to/seajs-appcache.js"></script>
 
