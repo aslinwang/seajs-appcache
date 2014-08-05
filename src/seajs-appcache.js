@@ -1,34 +1,94 @@
 /**
  * The Sea.js plugin for appcache and increjs 
+ * require : sea.js 3.0.0
+ * 
  * localStorage,version,increjs
  *  MI.define
  *  MI.app
  *  MI.appcache
  *  MI.S
  *
- *  test framework:mocha+should.js
+ * test framework
+ *  mocha+should.js+blanket.js
  *
  * @todo 
  * 1、appcache测试用例
+ * 2、开发increjs node模块 increfile.js
+ * 3、暂不支持IE
+ * 4、holdLoad不好使，只能存callback+打标记了
  *
  * seatools build会检测语法错误
  * 
  * appCache原理：
  * 使用ajax的方式请求cdn上的js代码内容，并将其存入localStorage中
+ * 版本控制方案：在文件名后追加"_140801x",如"a_140801.js","a_140801a.js"
+ * 增量文件生成，可使用increjs工作(https://github.com/aslinwang/increjs)
  * 可能有跨域问题，解决方案
  *  - Access-Control-Allow-Origin:http://m.qzone.com
  *  - 将js文件存在与主站同域的CDN上
+ *  - 本插件方案专为腾讯微博实现
  */
 
 var Module = seajs.Module;
 var Data = seajs.data;
 
-Function.prototype.__proxy = function(context) {
-  var method = this;
-  return function(){
-    return method.apply(context || {}, arguments);
+/**
+ * 浏览器版本
+ * 
+ * @type Object
+ *            @example
+ *            B.ie//如果是IE，返回IE的版本号(6,8,9,10,11)
+ *            B.ie6
+ *            B.ipad
+ */
+var B = (function(){ //Browser
+  var b = {},
+    userAgent = navigator.userAgent,
+    key = {
+      win : 'Windows',
+      mac : 'Mac',
+      ie : 'MSIE',
+      ie6 : 'MSIE 6',
+      ie7 : 'MSIE 7',
+      ie8 : 'MSIE 8',
+      ie9 : 'MSIE 9',
+      safari : 'WebKit',
+      webkit : 'WebKit',
+      chrome : 'Chrome',
+      ipad : 'iPad',
+      iphone : 'iPhone',
+      os4 : 'OS 4',
+      os5 : 'OS 5',
+      os6 : 'OS 6',
+      qq : 'QQBrowser',
+      firefox : 'Firefox',
+      tt : 'TencentTraveler',
+      opera : 'Opera',
+      esobi : 'eSobiSubscriber'//http://product.esobi.com/esobi/index.jsp，@liuy使用这货
+    };
+  b.win = b.win || userAgent.indexOf('Win32') != -1;
+  for(var item in key){
+    b[item] = userAgent.indexOf(key[item]) != -1;
   };
-};
+  b.ie6 = b.ie6 && !b.ie7 && !b.ie8;
+  b.opera = window['opera'] || b.opera;
+  try{
+    b.maxthon = window['external'] && window['external']['max_version'];//Error In Some ie8
+  }catch(e){}
+  //detect ie11
+  var m = /(msie\s|trident.*rv:)([\w.]+)/.exec(userAgent.toLowerCase());
+  if(m && m.length > 0){
+    b.ie = true;
+    if(m[2]){
+      b.ie = parseFloat(m[2]);
+    }
+  }
+  //@TODO 万恶的微软啊，先这样处理IE11吧，如果以后出IE12什么的要升级Trident，到时候再处理吧
+  if(!!userAgent.match(/Trident\/7\./)){
+    b.ie = 11;
+  }
+  return b;
+})();
 
 var DomReady = (function(){
   var done = false,//ready队列中的操作是否执行完毕
@@ -124,6 +184,20 @@ function createNode(n){
   return document.createElement(n);
 }
 
+function attr(o,n,v){
+  if(o && o.getAttribute){
+    if(v == undefined){
+      return o.getAttribute(n) || '';
+    }
+    else if(v == ''){
+      o.removeAttribute(n);
+    }
+    else{
+      o.setAttribute(n,v);
+    }
+  }
+}
+
 function html(s){
   var wrap = createNode('div'),nodes=[];
   wrap.innerHTML = s;
@@ -135,6 +209,12 @@ function html(s){
     }
   }
   return nodes;
+}
+
+function sealog(){
+  if(Data.appcache && Data.appcache.dev){
+    console.log.apply(console, arguments);
+  }
 }
 
 var xmlHttp = (function(){
@@ -322,6 +402,35 @@ var getjs = window.__getjs__ || function(url, cb){
   });  
 };
 
+var getJsonp = function(url, call, charset, keep){
+  var el = createNode('script');
+  if(B.ie && B.ie < 11){
+    el.onreadystatechange = function(){
+      if(this.readyState == 'loaded' || this.readyState == 'complete'){
+        if(call){
+          call();
+        }
+        el = null;
+      }
+    }
+  }
+  else{
+    el.onload = function(){
+      if(call){
+        call();
+      }
+      el = null;
+    }
+  }
+  if(charset){
+    attr(el, 'charset', charset);
+  }
+  attr(el, 'type', 'text/javascript');
+  attr(el, 'src', url);
+  attr(el, 'async', 'true');
+  document.getElementsByTagName('head')[0].appendChild(el);
+};
+
 var S = {
   _maxRetry : 1,
   _retry : true,
@@ -388,8 +497,27 @@ var jscode = (function(){
     var info = {};
     info.jsdir = Data.appcache.jsdir;
     info.url = uri.replace(Data.appcache.jsdir, '').replace(/_(\w+).js/, '');
-    info.ver = uri.match(/_(\w+).js/);
-    info.ver = info.ver ? info.ver[1] : null;
+    // info.ver = uri.match(/_(\w+).js/);
+    // info.ver = info.ver ? info.ver[1] : null;
+
+    var vers = uri.match(/\d{6}[a-zA-Z0-9]?/g);
+    if(vers){
+      if(vers.length == 1){
+        info.ver = vers[0];
+        info.localver = null;
+      }
+      else if(vers.length == 2){
+        info.ver = vers[1];
+        info.localver = vers[0];
+      }
+    }
+    else{
+      info.ver = null;
+      info.localver = null;
+    }
+
+    manifest = S.get(manifestKey, true) || {};
+    info.cachever = manifest[info.url];
 
     return info;
   };
@@ -403,21 +531,30 @@ var jscode = (function(){
   };
 
   var ret = {};
-  ret.save = function(uri){
+  ret.save = function(uri, code){
     uri = uri.replace('mat1.gtimg.com/www', 'www.qq.com/mb/mat1');//腾讯微博解决方案
     var info = parseUri(uri);
     if(info.ver){//有版本号才保存
       manifest.jsdir = info.jsdir;
-      getjs(uri, function(text){
+      if(code){
         manifest[info.url] = info.ver;
 
         S.set(manifestKey, JSON.stringify(manifest));
-        S.set(info.url, text);
-      });
+        S.set(info.url, code);
+      }
+      else{
+        getjs(uri, function(text){
+          manifest[info.url] = info.ver;
+
+          S.set(manifestKey, JSON.stringify(manifest));
+          S.set(info.url, text);
+        });
+      }
     }
   };
 
   ret.exist = function(uri){//检测uri是否在本地存储中有备份
+    /*
     manifest = S.get(manifestKey, true) || {};
     var info = parseUri(uri);
     if(info.ver){
@@ -426,17 +563,26 @@ var jscode = (function(){
       }
     }
     return false;
+    */
+   var info = parseUri(uri);
+   return info.cachever && info.cachever == info.ver;
   };
 
   ret.exec = function(uri){//从cache中获取代码并执行
-    var info = parseUri(uri);
-    if(info.ver){
-      var code = S.get(info.url) || '';
-      if(code){
-        execjs(code);
-        console.log('exec js...');
-      }
+    var code = ret.getcode(uri);
+    if(code){
+      execjs(code);
+      sealog('exec js...');
     }
+  };
+
+  ret.getcode = function(uri){
+    var info = parseUri(uri);
+    var code = ''
+    if(info.ver){
+      code = S.get(info.url) || '';
+    }
+    return code;
   };
 
   ret.clear = function(){//从cache中清除
@@ -444,14 +590,69 @@ var jscode = (function(){
     manifest = {};
   };
 
+  ret.getIncre = function(uri){//是否请求增量版本
+    var info = parseUri(uri);
+    var _ret = {
+      incre : false,
+      ver : info.ver,//cdn version
+      localver : info.localver,//local version
+      cachever : info.cachever//cache version
+    };
+    //parse version
+    if(info.ver){
+      if(info.localver && info.localver == info.cachever && increEnable){
+        _ret.js = [Data.appcache.jsdir, info.url, '_', info.localver, '_', info.ver, '.js'].join('');
+        _ret.incre = true;
+      }
+      else{
+        _ret.js = [Data.appcache.jsdir, info.url, '_', info.ver, '.js'].join('');
+      }
+      _ret.alljs = [Data.appcache.jsdir, info.url, '_', info.ver, '.js'].join('');
+    }
+    else{
+      _ret.js = uri;
+      _ret.alljs = uri;
+    }
+    //check enable
+    return _ret;
+  };
+
+  /**
+   * js增量更新算法-增量文件合并
+   * @param  {[type]} source       [description]
+   * @param  {[type]} trunksize    [description]
+   * @param  {[type]} checksumcode [description]
+   * @return {[type]}              [description]
+   */
+  ret.mergejs = function(source, trunksize, checksumcode){
+    var str = '';
+    for(var i = 0; i < checksumcode.length; i++){
+      var code = checksumcode[i];
+      if(typeof (code) == 'string'){
+        str += code;
+      }
+      else{
+        var start = code[0]*trunksize;
+        var end = code[1]*trunksize;
+        var oldcode = source.substr(start, end);
+        str += oldcode;
+      }
+    }
+    return str;
+  };
+
+  ret.execjs = execjs;
+
   return ret;
 }());
 
 var cacheEnable = true;//是否启用appcache
 var increEnable = true;//是否启用增量更新
+var modInfoCache = {};
 
 function debug(){
   seajs.S = S;
+  seajs.getjs = getjs;
   seajs.clearS = function(){//快速清空cache
     jscode.clear();
   };
@@ -470,7 +671,7 @@ seajs.on('config', function(){
 });
 
 seajs.on("load", function(arg){
-  //console.log('load>>>>>', arg);
+  //sealog('load>>>>>', arg);
 });
 
 seajs.on("fetch", function(data){
@@ -478,23 +679,171 @@ seajs.on("fetch", function(data){
   //1.查询本地存储，是否有本地cache
   //2.查看url的版本号，是否符合增量规则[pathname:jscode]
   //Data.fetchedList[data.requestUri] = true;//终止网络请求
+  var mod = Module.get(data.uri);
   if(cacheEnable){
     if(!jscode.exist(data.uri)){
-      jscode.save(data.uri);//存储code
-      console.log('save');
+      var incre = jscode.getIncre(data.uri);
+      if(incre.incre){
+        var key = data.uri.replace(Data.base, '')
+                          .replace(/_[0-9a-zA-Z]+/g, '')
+                          .replace('.js', '');
+        //getjs increjs
+        getJsonp(incre.js, function(){
+          var mergejs = '';
+          var localjs = '';
+          var increData = window['increCallback_' + key.replace('/', '_')];
+
+          localjs = jscode.getcode(Data.base + key + '_' + incre.cachever + '.js');
+          if(localjs && increData){
+            //merge js
+            mergejs = jscode.mergejs(localjs, increData.chunkSize, increData.data);
+            mergejs = mergejs ? '/**' + incre.localver + '_' + incre.ver + '**/' + mergejs : localjs;
+
+            try{
+              //exec js
+              jscode.execjs(mergejs);
+              console.log(mergejs);
+
+              //resume callback
+              Module.resumeCallback();
+
+              //save js
+              jscode.save(Data.base + key + '_' + incre.ver + '.js', mergejs);
+            }
+            catch(e){
+              sealog(e);
+              getJsonp(incre.alljs, function(){
+                //resume callback
+                Module.resumeCallback();
+
+                jscode.save(incre.alljs);
+              });
+            }
+          }
+        });
+        Data.fetchedList[data.uri] = true;//终止网络请求
+        mod.holdCallback();
+      }
+      else{
+        jscode.save(incre.js);//存储code
+        data.requestUri = incre.js;
+      }
     }
     else{//本地cache有代码，不必重新请求
       jscode.exec(data.uri);
       Data.fetchedList[data.uri] = true;//终止网络请求
     }
   }
-  console.log('fetch>>>>>');
+  sealog('fetch>>>>>');
+});
+
+seajs.on("loaded", function(mod){
+  if(mod.nonet){
+    mod.status = Module.STATUS.FETCHING;
+  }
 });
 
 seajs.on("request", function(arg){
-  console.log('request>>>>>');
+  sealog('request>>>>>');
 });
 
 seajs.on("define", function(data){
-  console.log('define>>>>>');
+  sealog('define>>>>>');
 });
+
+seajs.on('error', function(data){
+  //请求失败-js文件404
+});
+
+Module.prototype.holdCallback = function(){
+  var mod = this;
+
+  mod.nonet = true;//不经过网络请求
+  if(typeof mod.callback == 'function'){
+    mod.holdCb = true;
+  }
+  for(var i = 0, len = (mod._entry || []).length; i < len; i++){
+    var entry = mod._entry[i];
+    if(typeof entry.callback == 'function'){
+      entry.holdCb = true;
+    }
+  }
+
+  mod.entrybak = mod._entry;
+};
+
+//@override
+Module.prototype.onload = function() {
+  var mod = this;
+  mod.status = Module.STATUS.LOADED;
+
+  // When sometimes cached in IE, exec will occur before onload, make sure len is an number
+  for (var i = 0, len = (mod._entry || []).length; i < len; i++) {
+    var entry = mod._entry[i];
+    if (--entry.remain === 0) {
+      entry.callback();
+    }
+  }
+
+  seajs.emit('loaded', mod);
+
+  delete mod._entry
+}
+
+var isArray = Array.isArray || isType("Array");
+
+// @override
+// Use function is equal to load a anonymous module
+Module.use = function (ids, callback, uri) {
+  var mod = Module.get(uri, isArray(ids) ? ids : [ids]);
+
+  mod._entry.push(mod);
+  mod.history = {};
+  mod.remain = 1;
+
+  mod.callback = function() {
+    if (callback && !mod.holdCb) {
+      var exports = [];
+      var uris = mod.resolve();
+
+      for (var i = 0, len = uris.length; i < len; i++) {
+        exports[i] = seajs.cache[uris[i]].exec();
+      }
+
+      callback.apply(window, exports);
+    }
+    modInfoCache[mod.uri] = {
+      mod : mod,
+      callback : callback,
+      exports : exports
+    };
+
+    delete mod.callback;
+    delete mod.history;
+    delete mod.remain;
+    delete mod._entry;
+  }
+
+  mod.load();
+}
+
+Module.resumeCallback = function(){
+  for(var key in modInfoCache){
+    var modInfo = modInfoCache[key];
+    var mod = modInfo.mod;
+    if(mod.holdCb){
+      var exports = [];
+      var uris = mod.resolve();
+      for (var i = 0, len = uris.length; i < len; i++) {
+        var cache = seajs.cache[uris[i]];
+        cache.status = Module.STATUS.LOADED;
+        cache._entry = cache.entrybak;
+        exports[i] = cache.exec();
+      }
+
+      modInfo.callback.apply(window, exports);
+      delete mod.holdCb;
+    }
+    delete modInfoCache[key];
+  }
+}

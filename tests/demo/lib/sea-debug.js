@@ -778,7 +778,7 @@ Module.prototype.fetch = function(requestCache) {
   mod.status = STATUS.FETCHING
 
   // Emit `fetch` event for plugins such as combo plugin
-  var emitData = { uri: uri }
+  var emitData = { uri: uri}
   emit("fetch", emitData)
   var requestUri = emitData.requestUri || uri
 

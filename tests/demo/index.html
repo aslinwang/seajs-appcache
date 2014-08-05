@@ -12,13 +12,14 @@
 <script>
   // Clear preload
 //  seajs.data.preload.length = 0
-  window.dev = true;//develop
 
   seajs.config({
     base : '/tests/assets',
     alias : {
       a : 'a_140707.js',
-      b : 'b_140707.js'
+      b : 'b_140707_140708.js',
+      //b : 'b_140707.js',
+      'sub/d' : 'sub/d_140731.js'
     },
     appcache : {//appcache插件相关配置
       //dev : true,
@@ -29,7 +30,7 @@
   });
   
   seajs.use('b', function(b){
-    //console.log(a);
+    //console.log(b);
     b.sayHi('aslin');
   });
 

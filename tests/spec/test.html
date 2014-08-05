@@ -13,8 +13,9 @@
 <script src="../vendor/mocha.js"></script>
 <script src="../vendor/chai.js"></script>
 <script src="../vendor/gear.js"></script>
+<script src="../vendor/blanket.js" data-cover-adapter="../vendor/mocha-blanket.js" data-cover-flags="debug"></script>
 <script src="../demo/lib/sea-debug.js"></script>
-<script src="../../dist/seajs-appcache-debug.js"></script>
+<script src="../../dist/seajs-appcache-debug.js" data-cover></script>
 <script type="text/javascript">
   var expect = chai.expect;
 
@@ -99,7 +100,56 @@
           done();
         });
       });
-    })
+    });
+
+    describe('incre js module', function(){
+      it('should get incre js file when conditions satisfied', function(){
+        var manifest = seajs.S.get('seajs_manifest', true) || {};
+        var key = '/assets/b';
+        manifest[key] = '140707';
+        //seajs.S.set('seajs_manifest', JSON.stringify(manifest));
+        //seajs.S.set(key, '');
+
+        seajs.config(gear.extend(cfg, {
+          alias : {
+            b : 'c_140707_140708.js'
+          }
+        }));
+
+      });
+    });
+
+    describe('custom getjs function', function(){
+      window.__getjs__ = function(url, cb){
+        var xhr = new window.XMLHttpRequest();
+        var timer = setTimeout(function(){
+            xhr.abort()
+            cb(null)
+        }, 30000);
+        xhr.open('GET',url,true);
+        xhr.onreadystatechange = function(){
+            if(xhr.readyState === 4){
+                clearTimeout(timer)
+                if(xhr.status === 200){
+                  cb(xhr.responseText)
+                }else{
+                  cb(null)
+                }
+            }
+        };
+        xhr.send(null);
+
+        return 'custom getjs';
+      };
+
+      it('should use custom getjs function', function(){
+        var url = 'http://seajs.t.qq.com:8000/tests/assets/c_140707.js';
+        var ret = seajs.getjs(url, function(js){
+
+        });
+        expect(ret).to.equal('custom getjs');
+      });
+    });
   });
 
   mocha.run();
